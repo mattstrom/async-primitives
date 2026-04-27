@@ -1,0 +1,53 @@
+{
+	"name": "@mattstrom/async-primitives",
+	"version": "0.1.2",
+	"description": "Collection of async primitives",
+	"homepage": "https://github.com/mattstrom/async-primitives#readme",
+	"bugs": {
+		"url": "https://github.com/mattstrom/async-primitives/issues"
+	},
+	"license": "MIT",
+	"author": "Matt Strom <matt@mattstrom.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mattstrom/async-primitives.git"
+	},
+	"files": [
+		"dist",
+		"!dist/**/*.test.ts"
+	],
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"require": "./dist/index.cjs"
+		},
+		"./package.json": "./package.json"
+	},
+	"types": "./dist/index.d.cts",
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "vp pack",
+		"dev": "vp pack --watch",
+		"test": "vp test",
+		"check": "vp check",
+		"prepublishOnly": "vp run build",
+		"prepare": "vp config"
+	},
+	"devDependencies": {
+		"@types/node": "^25.5.0",
+		"@typescript/native-preview": "7.0.0-dev.20260328.1",
+		"bumpp": "^11.0.1",
+		"typescript": "^6.0.2",
+		"vite-plus": "^0.1.14"
+	},
+	"overrides": {
+		"vite": "npm:@voidzero-dev/vite-plus-core@latest",
+		"vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+	},
+	"packageManager": "npm@11.13.0",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.mjs"
+}
