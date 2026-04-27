@@ -20,6 +20,7 @@ npm install @mattstrom/async-primitives
 - [CircuitBreaker](#circuitbreaker)
 - [pMap / pMapSemaphore](#pmap--pmapsemaphore)
 - [TokenBucket](#tokenbucket)
+- [LeakyBucket](#leakybucket)
 - [SlidingWindowLimiter](#slidingwindowlimiter)
 - [rateLimitedMap](#ratelimitedmap)
 - [Utilities](#utilities)
@@ -249,6 +250,7 @@ const data = await retry(() => fetch('/api/resource').then((r) => r.json()), {
 Prevents cascading failures by tracking successes and failures and tripping open when a threshold is exceeded. Transitions automatically from `open` → `half-open` after a reset timeout, then back to `closed` on the next success.
 
 States:
+
 - **closed** — requests pass through normally.
 - **open** — requests fail immediately with `"Circuit open"`.
 - **half-open** — one request is allowed through to probe recovery; a success closes the circuit, a failure re-opens it.
@@ -257,7 +259,7 @@ States:
 import { CircuitBreaker } from '@mattstrom/async-primitives';
 
 const breaker = new CircuitBreaker({
-	failureThreshold: 5,   // open after 5 consecutive failures
+	failureThreshold: 5, // open after 5 consecutive failures
 	resetTimeoutMs: 10000, // try again after 10s
 });
 
@@ -270,8 +272,8 @@ try {
 }
 
 // Inspect state
-breaker.getState();  // 'closed' | 'open' | 'half-open'
-breaker.getStats();  // { successes: number, failures: number }
+breaker.getState(); // 'closed' | 'open' | 'half-open'
+breaker.getStats(); // { successes: number, failures: number }
 ```
 
 ---
@@ -318,6 +320,27 @@ await bucket.acquire(3); // wait for 3 tokens
 if (bucket.tryAcquire()) {
 	// proceed immediately
 }
+```
+
+---
+
+### LeakyBucket
+
+Enforces a strict output rate by queuing requests and draining them one at a time at a fixed rate. Unlike `TokenBucket`, bursts are not allowed — every request waits its turn regardless of prior idle time.
+
+```ts
+import { LeakyBucket } from '@mattstrom/async-primitives';
+
+const bucket = new LeakyBucket({ capacity: 10, drainRate: 5 }); // 5 req/sec, up to 10 queued
+
+try {
+	await bucket.acquire(); // wait in line until drained
+} catch {
+	// thrown immediately when the queue is full — request is dropped
+}
+
+bucket.pending(); // number of requests currently queued
+bucket.isFull(); // true when the queue has reached capacity
 ```
 
 ---
