@@ -6,6 +6,6 @@ export * from './mutex.ts';
 export * from './pipeline.ts';
 export * from './resource-pool.ts';
 export * from './retry.ts';
-export * from './semaphore.ts';
 
+export * from './bounded-concurrency/index.ts';
 export * from './rate-limiting/index.ts';

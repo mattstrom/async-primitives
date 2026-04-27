@@ -17,6 +17,9 @@
 		"!dist/**/*.test.ts"
 	],
 	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.mjs",
+	"types": "./dist/index.d.cts",
 	"exports": {
 		".": {
 			"import": "./dist/index.mjs",
@@ -24,7 +27,6 @@
 		},
 		"./package.json": "./package.json"
 	},
-	"types": "./dist/index.d.cts",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -47,7 +49,5 @@
 		"vite": "npm:@voidzero-dev/vite-plus-core@latest",
 		"vitest": "npm:@voidzero-dev/vite-plus-test@latest"
 	},
-	"packageManager": "npm@11.13.0",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.mjs"
+	"packageManager": "npm@11.13.0"
 }

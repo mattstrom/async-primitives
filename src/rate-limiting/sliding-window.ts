@@ -3,7 +3,7 @@ import { createDeferred, type Deferred } from '../utils/deferred.ts';
 export interface SlidingWindowOptions {
 	maxRequests: number;
 	windowMs: number;
-	signal: AbortSignal;
+	signal?: AbortSignal;
 }
 
 export class SlidingWindowLimiter implements Disposable {
@@ -25,7 +25,7 @@ export class SlidingWindowLimiter implements Disposable {
 	constructor(private options: SlidingWindowOptions) {
 		// Initialize window tracking
 		this.adjustWindow();
-		this.options.signal.addEventListener('abort', this.onAbort);
+		this.options.signal?.addEventListener('abort', this.onAbort);
 	}
 
 	private onAbort = () => {
@@ -37,7 +37,7 @@ export class SlidingWindowLimiter implements Disposable {
 			return;
 		}
 
-		this.options.signal.removeEventListener('abort', this.onAbort);
+		this.options.signal?.removeEventListener('abort', this.onAbort);
 
 		if (this.timer) {
 			clearTimeout(this.timer);

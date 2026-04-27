@@ -25,6 +25,10 @@ export class AsyncQueue<T> {
 		return this._closed;
 	}
 
+	get size(): number {
+		return this.queue.length;
+	}
+
 	get atCapacity() {
 		return this.queue.length >= this.capacity;
 	}

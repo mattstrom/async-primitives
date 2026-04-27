@@ -1,6 +1,6 @@
 # @mattstrom/async-primitives
 
-A collection of async primitives for TypeScript: semaphores, mutexes, queues, resource pools, cancellable tasks, retry with backoff, and rate limiters.
+A collection of async primitives for TypeScript: semaphores, mutexes, queues, resource pools, cancellable tasks, retry with backoff, rate limiters, circuit breakers, and bounded-concurrency mapping.
 
 ## Installation
 
@@ -17,6 +17,8 @@ npm install @mattstrom/async-primitives
 - [Pool](#pool)
 - [CancellableTask / TaskGroup / withTimeout](#cancellation)
 - [retry](#retry)
+- [CircuitBreaker](#circuitbreaker)
+- [pMap / pMapSemaphore](#pmap--pmapsemaphore)
 - [TokenBucket](#tokenbucket)
 - [SlidingWindowLimiter](#slidingwindowlimiter)
 - [rateLimitedMap](#ratelimitedmap)
@@ -34,12 +36,12 @@ import { Semaphore } from '@mattstrom/async-primitives';
 const sem = new Semaphore(3); // allow 3 concurrent operations
 
 async function fetchWithLimit(url: string) {
-  await sem.acquire();
-  try {
-    return await fetch(url);
-  } finally {
-    sem.release();
-  }
+	await sem.acquire();
+	try {
+		return await fetch(url);
+	} finally {
+		sem.release();
+	}
 }
 ```
 
@@ -59,20 +61,24 @@ const mutex = new Mutex();
 // Manual acquire/release
 const unlock = await mutex.acquire();
 try {
-  // critical section
+	// critical section
 } finally {
-  unlock();
+	unlock();
 }
 
 // Convenience wrapper
 await mutex.withLock(async () => {
-  // critical section
+	// critical section
 });
 
 // Non-blocking attempt
 const unlock = mutex.tryAcquire();
 if (unlock) {
-  try { /* ... */ } finally { unlock(); }
+	try {
+		/* ... */
+	} finally {
+		unlock();
+	}
 }
 ```
 
@@ -91,17 +97,17 @@ const queue = new AsyncQueue<number>(10); // capacity of 10
 
 // Producer
 async function produce() {
-  for (let i = 0; i < 100; i++) {
-    await queue.enqueue(i); // suspends when queue is full
-  }
-  queue.close();
+	for (let i = 0; i < 100; i++) {
+		await queue.enqueue(i); // suspends when queue is full
+	}
+	queue.close();
 }
 
 // Consumer
 async function consume() {
-  for await (const item of queue) {
-    console.log(item);
-  }
+	for await (const item of queue) {
+		console.log(item);
+	}
 }
 ```
 
@@ -131,22 +137,22 @@ A generic resource pool with lazy creation, FIFO waiting, and automatic cleanup.
 import { Pool } from '@mattstrom/async-primitives';
 
 const pool = new Pool({
-  factory: () => createDatabaseConnection(),
-  destroy: (conn) => conn.close(),
-  maxSize: 10,
+	factory: () => createDatabaseConnection(),
+	destroy: (conn) => conn.close(),
+	maxSize: 10,
 });
 
 // Manual acquire/release
 const conn = await pool.acquire();
 try {
-  await conn.query('SELECT 1');
+	await conn.query('SELECT 1');
 } finally {
-  pool.release(conn);
+	pool.release(conn);
 }
 
 // Convenience wrapper (recommended)
 const result = await pool.withResource(async (conn) => {
-  return conn.query('SELECT 1');
+	return conn.query('SELECT 1');
 });
 
 // Inspect pool state
@@ -168,8 +174,8 @@ Wraps an `AbortSignal`-aware function with cancellation support.
 import { CancellableTask } from '@mattstrom/async-primitives';
 
 const task = new CancellableTask(async (signal) => {
-  const res = await fetch('/api/data', { signal });
-  return res.json();
+	const res = await fetch('/api/data', { signal });
+	return res.json();
 });
 
 const promise = task.start();
@@ -195,10 +201,7 @@ group.cancelAll();
 await group.waitForAll();
 
 // Race: returns the first success, cancels the rest
-const result = await group.race([
-  (signal) => tryServer('us-east', signal),
-  (signal) => tryServer('eu-west', signal),
-]);
+const result = await group.race([(signal) => tryServer('us-east', signal), (signal) => tryServer('eu-west', signal)]);
 ```
 
 #### `withTimeout`
@@ -209,7 +212,7 @@ Runs a task and cancels it if it doesn't complete within a time limit.
 import { withTimeout } from '@mattstrom/async-primitives';
 
 const result = await withTimeout(async (signal) => {
-  return fetch('/slow-api', { signal }).then(r => r.json());
+	return fetch('/slow-api', { signal }).then((r) => r.json());
 }, 5000);
 ```
 
@@ -222,22 +225,80 @@ Retries an async function with exponential backoff and optional jitter.
 ```ts
 import { retry } from '@mattstrom/async-primitives';
 
-const data = await retry(() => fetch('/api/resource').then(r => r.json()), {
-  maxAttempts: 5,
-  baseDelayMs: 100,  // default
-  maxDelayMs: 10000, // default
-  jitter: true,      // default
-  shouldRetry: (error, attempt) => !(error instanceof AuthError),
+const data = await retry(() => fetch('/api/resource').then((r) => r.json()), {
+	maxAttempts: 5,
+	baseDelayMs: 100, // default
+	maxDelayMs: 10000, // default
+	jitter: true, // default
+	shouldRetry: (error, attempt) => !(error instanceof AuthError),
 });
 ```
 
-| Option | Default | Description |
-|---|---|---|
-| `maxAttempts` | `Infinity` | Maximum number of attempts |
-| `baseDelayMs` | `100` | Initial delay in milliseconds |
-| `maxDelayMs` | `10000` | Maximum delay cap |
-| `jitter` | `true` | Randomize delay by ±50% |
+| Option        | Default     | Description                      |
+| ------------- | ----------- | -------------------------------- |
+| `maxAttempts` | `Infinity`  | Maximum number of attempts       |
+| `baseDelayMs` | `100`       | Initial delay in milliseconds    |
+| `maxDelayMs`  | `10000`     | Maximum delay cap                |
+| `jitter`      | `true`      | Randomize delay by ±50%          |
 | `shouldRetry` | always true | Predicate to stop retrying early |
+
+---
+
+### CircuitBreaker
+
+Prevents cascading failures by tracking successes and failures and tripping open when a threshold is exceeded. Transitions automatically from `open` → `half-open` after a reset timeout, then back to `closed` on the next success.
+
+States:
+- **closed** — requests pass through normally.
+- **open** — requests fail immediately with `"Circuit open"`.
+- **half-open** — one request is allowed through to probe recovery; a success closes the circuit, a failure re-opens it.
+
+```ts
+import { CircuitBreaker } from '@mattstrom/async-primitives';
+
+const breaker = new CircuitBreaker({
+	failureThreshold: 5,   // open after 5 consecutive failures
+	resetTimeoutMs: 10000, // try again after 10s
+});
+
+try {
+	const result = await breaker.execute(() => fetch('/api/data').then((r) => r.json()));
+} catch (err) {
+	if (err.message === 'Circuit open') {
+		// fast-fail — upstream is unhealthy
+	}
+}
+
+// Inspect state
+breaker.getState();  // 'closed' | 'open' | 'half-open'
+breaker.getStats();  // { successes: number, failures: number }
+```
+
+---
+
+### pMap / pMapSemaphore
+
+Apply an async function to every item in an array with bounded concurrency. Both functions preserve result order and reject immediately on the first error.
+
+**`pMap`** — uses an internal queue, dispatching the next item as soon as a slot opens:
+
+```ts
+import { pMap } from '@mattstrom/async-primitives';
+
+const results = await pMap(
+	urls,
+	(url) => fetch(url).then((r) => r.json()),
+	4, // at most 4 in-flight at once
+);
+```
+
+**`pMapSemaphore`** — starts all tasks simultaneously but gates them through a `Semaphore`, so all promises are created eagerly. Prefer `pMap` for large arrays where eager allocation is wasteful.
+
+```ts
+import { pMapSemaphore } from '@mattstrom/async-primitives';
+
+const results = await pMapSemaphore(urls, (url) => fetch(url).then((r) => r.json()), 4);
+```
 
 ---
 
@@ -250,12 +311,12 @@ import { TokenBucket } from '@mattstrom/async-primitives';
 
 const bucket = new TokenBucket({ capacity: 10, refillRate: 5 }); // 5 tokens/sec
 
-await bucket.acquire();    // wait for 1 token
-await bucket.acquire(3);   // wait for 3 tokens
+await bucket.acquire(); // wait for 1 token
+await bucket.acquire(3); // wait for 3 tokens
 
 // Non-blocking
 if (bucket.tryAcquire()) {
-  // proceed immediately
+	// proceed immediately
 }
 ```
 
@@ -270,16 +331,16 @@ import { SlidingWindowLimiter } from '@mattstrom/async-primitives';
 
 const controller = new AbortController();
 const limiter = new SlidingWindowLimiter({
-  maxRequests: 100,
-  windowMs: 60_000, // 100 requests per minute
-  signal: controller.signal,
+	maxRequests: 100,
+	windowMs: 60_000, // 100 requests per minute
+	signal: controller.signal,
 });
 
 await limiter.acquire(); // waits if the window is full
 
 // Non-blocking
 if (limiter.tryAcquire()) {
-  // proceed immediately
+	// proceed immediately
 }
 
 // Dispose when done
@@ -297,11 +358,7 @@ import { TokenBucket, rateLimitedMap } from '@mattstrom/async-primitives';
 
 const bucket = new TokenBucket({ capacity: 10, refillRate: 10 });
 
-const results = await rateLimitedMap(
-  urls,
-  (url) => fetch(url).then(r => r.json()),
-  bucket,
-);
+const results = await rateLimitedMap(urls, (url) => fetch(url).then((r) => r.json()), bucket);
 ```
 
 ---

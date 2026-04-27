@@ -1,4 +1,4 @@
-import { createDeferred, type Deferred } from './utils/deferred.ts';
+import { createDeferred, type Deferred } from '../utils/deferred.ts';
 
 /**
  * A Semaphore is a concurrency control mechanism that limits the number of concurrent executions
